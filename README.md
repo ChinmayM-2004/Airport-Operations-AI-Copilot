@@ -865,21 +865,6 @@ Potential future improvements include:
 
 ---
 
-## 📌 Project Status
-
-| Day    | Component                           | Status     |
-| ------ | ----------------------------------- | ---------- |
-| Day 1  | RAG & Policy Knowledge Base         | ✅ Complete |
-| Day 2  | Operational Data & Function Calling | ✅ Complete |
-| Day 3  | Multi-Agent AI Copilot              | ✅ Complete |
-| Day 4  | Safety & Human-in-the-Loop          | ✅ Complete |
-| Day 5  | Streamlit Application               | ✅ Complete |
-| GitHub | Repository Published                | ✅ Complete |
-
-The project demonstrates an end-to-end **Generative AI + RAG + Agentic AI + Tool Calling + Safety + Human-in-the-Loop** workflow for airport operations.
-
----
-
 ## 👨‍💻 Author
 
 **Chinmay M**
