@@ -1,0 +1,625 @@
+"""
+Distilled Interaction Dataset Logger
+====================================
+
+Day 4 - AI Safety, Guardrails & Human-in-the-Loop
+
+Stores successful AI interactions in JSONL format for:
+
+- prompt improvement
+- evaluation
+- future fine-tuning
+- agent workflow analysis
+
+Fine-tuning is NOT performed by this module.
+
+The logger stores one structured interaction per JSONL line.
+"""
+
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+
+# ============================================================
+# PATHS
+# ============================================================
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+DATA_DIRECTORY = PROJECT_ROOT / "data"
+
+DISTILLED_FILE = (
+    DATA_DIRECTORY / "distilled_training_data.jsonl"
+)
+
+
+# ============================================================
+# DISTILLATION LOGGER
+# ============================================================
+
+
+class DistillationLogger:
+    """
+    Writes successful AI interactions to a JSONL file.
+
+    Each interaction is stored as one JSON object per line.
+    """
+
+    def __init__(
+        self,
+        file_path: Optional[Path] = None,
+    ):
+        self.file_path = (
+            Path(file_path)
+            if file_path
+            else DISTILLED_FILE
+        )
+
+        self.file_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+    # --------------------------------------------------------
+    # LOG ONE INTERACTION
+    # --------------------------------------------------------
+
+    def log(
+        self,
+        user_request: str,
+        agents_invoked: List[str],
+        tool_calls: List[Dict[str, Any]],
+        retrieved_policies: List[Dict[str, Any]],
+        recommendation: str,
+        recommendation_reasoning: str,
+        risk_level: str,
+        policy_check: Dict[str, Any],
+        human_approval: Dict[str, Any],
+        final_action: str,
+        execution_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Store one successful AI interaction.
+
+        Returns
+        -------
+        Dict[str, Any]
+            The record that was written.
+        """
+
+        record = {
+            "timestamp": datetime.now().isoformat(),
+            "user_request": user_request,
+            "agents_invoked": agents_invoked,
+            "tool_calls": tool_calls,
+            "retrieved_policies": retrieved_policies,
+            "recommendation": recommendation,
+            "recommendation_reasoning": recommendation_reasoning,
+            "risk_level": risk_level,
+            "policy_check": policy_check,
+            "human_approval": human_approval,
+            "final_action": final_action,
+            "execution_result": execution_result,
+        }
+
+        with self.file_path.open(
+            "a",
+            encoding="utf-8",
+        ) as file:
+
+            file.write(
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                    default=str,
+                )
+                + "\n"
+            )
+
+        return record
+
+    # --------------------------------------------------------
+    # CREATE + PERSIST DISTILLED RECORD
+    # --------------------------------------------------------
+
+    def create_distilled_record(
+        self,
+        state: Dict[str, Any],
+        execution_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Convert the shared agent state and execution result
+        into the distilled dataset structure and persist it.
+
+        This method is intentionally available on the
+        DistillationLogger class because the Safe Executor
+        uses a logger instance to write the record.
+        """
+
+        human_approval = execution_result.get(
+            "human_approval",
+            {},
+        )
+
+        policy_check = {
+            "decision": state.get(
+                "policy_decision",
+                "unknown",
+            ),
+            "approval_required": state.get(
+                "approval_required",
+                "unknown",
+            ),
+            "findings": state.get(
+                "policy_findings",
+                [],
+            ),
+            "restrictions": state.get(
+                "policy_restrictions",
+                [],
+            ),
+        }
+
+        risk = execution_result.get(
+            "risk",
+            {},
+        )
+
+        risk_level = risk.get(
+            "risk_level",
+            state.get(
+                "severity_level",
+                "unknown",
+            ),
+        )
+
+        # ----------------------------------------------------
+        # Recommendation
+        # ----------------------------------------------------
+        #
+        # The state normally contains the natural-language
+        # recommendation generated by the Resolution Agent.
+        #
+        # If available, preserve the structured recommendation
+        # from the execution result as well.
+        # ----------------------------------------------------
+
+        recommendation = state.get(
+            "recommended_action",
+            "",
+        )
+
+        structured_recommendation = execution_result.get(
+            "recommendation",
+        )
+
+        if structured_recommendation:
+            recommendation = structured_recommendation
+
+        # ----------------------------------------------------
+        # Persist the interaction through log()
+        # ----------------------------------------------------
+
+        return self.log(
+            user_request=state.get(
+                "user_query",
+                "",
+            ),
+            agents_invoked=[
+                "orchestrator",
+                "investigator",
+                "policy_agent",
+                "resolution_agent",
+            ],
+            tool_calls=state.get(
+                "tool_calls",
+                [],
+            ),
+            retrieved_policies=state.get(
+                "policy_results",
+                [],
+            ),
+            recommendation=recommendation,
+            recommendation_reasoning=state.get(
+                "recommendation_reasoning",
+                "",
+            ),
+            risk_level=risk_level,
+            policy_check=policy_check,
+            human_approval=human_approval,
+            final_action=execution_result.get(
+                "final_action",
+                state.get(
+                    "recommended_action",
+                    "",
+                ),
+            ),
+            execution_result=execution_result,
+        )
+
+    # --------------------------------------------------------
+    # READ ALL
+    # --------------------------------------------------------
+
+    def read_all(
+        self,
+    ) -> List[Dict[str, Any]]:
+        """
+        Read all stored interaction records.
+        """
+
+        if not self.file_path.exists():
+            return []
+
+        records = []
+
+        with self.file_path.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
+
+            for line in file:
+
+                line = line.strip()
+
+                if not line:
+                    continue
+
+                records.append(
+                    json.loads(line)
+                )
+
+        return records
+
+    # --------------------------------------------------------
+    # COUNT
+    # --------------------------------------------------------
+
+    def count(self) -> int:
+        """
+        Return the number of stored interactions.
+        """
+
+        return len(
+            self.read_all()
+        )
+
+    # --------------------------------------------------------
+    # LATEST
+    # --------------------------------------------------------
+
+    def get_latest(
+        self,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Return the most recent interaction.
+        """
+
+        records = self.read_all()
+
+        if not records:
+            return None
+
+        return records[-1]
+
+
+# ============================================================
+# BACKWARD-COMPATIBLE HELPER
+# ============================================================
+
+
+def create_distilled_record(
+    state: Dict[str, Any],
+    execution_result: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Convenience function for creating and persisting
+    a distilled interaction.
+
+    This keeps the original module-level API available
+    while the Safe Executor uses the class method.
+    """
+
+    logger = DistillationLogger()
+
+    return logger.create_distilled_record(
+        state=state,
+        execution_result=execution_result,
+    )
+
+
+# ============================================================
+# TESTS
+# ============================================================
+
+
+def run_distillation_tests():
+    """
+    Test the distilled interaction logger.
+    """
+
+    print(
+        "=" * 70
+    )
+
+    print(
+        "DAY 4 - DISTILLED DATASET TESTS"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    test_file = (
+        DATA_DIRECTORY
+        / "distilled_training_test.jsonl"
+    )
+
+    if test_file.exists():
+        test_file.unlink()
+
+    logger = DistillationLogger(
+        test_file
+    )
+
+    # --------------------------------------------------------
+    # Test direct logging
+    # --------------------------------------------------------
+
+    test_record = logger.log(
+        user_request=(
+            "Should we increase surge at SFO?"
+        ),
+        agents_invoked=[
+            "orchestrator",
+            "investigator",
+            "policy_agent",
+            "resolution_agent",
+        ],
+        tool_calls=[
+            {
+                "tool_name": "get_airport_metrics",
+                "arguments": {
+                    "airport_code": "SFO",
+                },
+            }
+        ],
+        retrieved_policies=[
+            {
+                "source": "sfo_pricing.md",
+                "policy_id": "SFO-PRC-001",
+                "section": "3",
+            }
+        ],
+        recommendation=(
+            "Maintain current surge and monitor."
+        ),
+        recommendation_reasoning=(
+            "Current operating metrics do not require "
+            "an increase in surge."
+        ),
+        risk_level="low",
+        policy_check={
+            "decision": "Allowed",
+            "approval_required": False,
+        },
+        human_approval={
+            "required": False,
+            "status": "not_required",
+        },
+        final_action=(
+            "Continue monitoring."
+        ),
+        execution_result={
+            "status": "success",
+            "executed": False,
+        },
+    )
+
+    assert test_record[
+        "user_request"
+    ] == (
+        "Should we increase surge at SFO?"
+    )
+
+    print(
+        "PASS - Distilled record created."
+    )
+
+    assert test_file.exists()
+
+    print(
+        "PASS - JSONL file created."
+    )
+
+    records = logger.read_all()
+
+    assert len(records) == 1
+
+    print(
+        "PASS - Distilled record successfully read."
+    )
+
+    assert records[0][
+        "risk_level"
+    ] == "low"
+
+    print(
+        "PASS - Risk level verified."
+    )
+
+    assert records[0][
+        "policy_check"
+    ][
+        "decision"
+    ] == "Allowed"
+
+    print(
+        "PASS - Policy decision verified."
+    )
+
+    assert logger.count() == 1
+
+    print(
+        "PASS - Record count verified."
+    )
+
+    latest = logger.get_latest()
+
+    assert latest is not None
+
+    assert latest[
+        "final_action"
+    ] == "Continue monitoring."
+
+    print(
+        "PASS - Latest record retrieved."
+    )
+
+    # --------------------------------------------------------
+    # Test create_distilled_record()
+    # --------------------------------------------------------
+
+    integration_test_file = (
+        DATA_DIRECTORY
+        / "distilled_training_integration_test.jsonl"
+    )
+
+    if integration_test_file.exists():
+        integration_test_file.unlink()
+
+    integration_logger = DistillationLogger(
+        integration_test_file
+    )
+
+    integration_state = {
+        "user_query": (
+            "Increase SFO surge to 1.4x."
+        ),
+        "tool_calls": [
+            {
+                "tool_name": "get_airport_metrics",
+                "arguments": {
+                    "airport_code": "SFO",
+                },
+            }
+        ],
+        "policy_results": [
+            {
+                "source": "sfo_pricing.md",
+                "policy_id": "SFO-PRC-001",
+                "section": "Section 3",
+                "relevant_rule": (
+                    "Maximum surge multiplier allowed "
+                    "without additional approval is 1.5x."
+                ),
+            }
+        ],
+        "recommended_action": (
+            "Increase SFO surge to 1.4x."
+        ),
+        "recommendation_reasoning": (
+            "Temporary supply pressure."
+        ),
+        "severity_level": "high",
+        "policy_decision": "Allowed",
+        "approval_required": True,
+        "policy_findings": [
+            "Requested surge is within policy maximum."
+        ],
+        "policy_restrictions": [],
+    }
+
+    integration_execution_result = {
+        "status": "executed",
+        "execution_allowed": True,
+        "risk": {
+            "risk_level": "high",
+            "approval_required": True,
+        },
+        "human_approval": {
+            "approval_required": True,
+            "approval_decision": "approved",
+            "approved": True,
+        },
+        "final_action": "increase surge",
+        "execution_result": "success",
+    }
+
+    integration_record = (
+        integration_logger.create_distilled_record(
+            state=integration_state,
+            execution_result=(
+                integration_execution_result
+            ),
+        )
+    )
+
+    assert (
+        integration_record["risk_level"]
+        == "high"
+    )
+
+    assert (
+        integration_record[
+            "human_approval"
+        ][
+            "approval_decision"
+        ]
+        == "approved"
+    )
+
+    assert (
+        integration_logger.count()
+        == 1
+    )
+
+    print(
+        "PASS - create_distilled_record() "
+        "persisted integration record."
+    )
+
+    integration_test_file.unlink()
+
+    assert not integration_test_file.exists()
+
+    print(
+        "PASS - Integration test file cleaned."
+    )
+
+    # --------------------------------------------------------
+    # Cleanup
+    # --------------------------------------------------------
+
+    test_file.unlink()
+
+    assert not test_file.exists()
+
+    print(
+        "PASS - Temporary audit test file cleaned."
+    )
+
+    print()
+
+    print(
+        "=" * 70
+    )
+
+    print(
+        "ALL DISTILLED DATASET TESTS PASSED"
+    )
+
+    print(
+        "=" * 70
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+
+if __name__ == "__main__":
+    run_distillation_tests()
